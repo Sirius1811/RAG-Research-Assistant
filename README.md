@@ -4,12 +4,6 @@
 
 ---
 
-## 📌 GitHub Description
-
-> AI-powered research assistant that enables RAG-based Q&A over uploaded PDFs with automatic web search fallback, paper analysis, multi-paper comparison, critical review generation, and research gap identification — built with Streamlit, LangChain, FAISS, and Groq.
-
----
-
 ## 📸 Features at a Glance
 
 | Page | What it does |
