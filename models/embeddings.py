@@ -1,4 +1,4 @@
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain.embeddings import HuggingFaceEmbeddings
 from config.config import EMBEDDING_MODEL
 
 
