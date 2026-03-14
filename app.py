@@ -73,17 +73,29 @@ def get_chat_response(chat_model, messages, system_prompt):
 
 def render_sources(sources: list, source_type: str):
     """
+    Renders source citations below an assistant reply.
+
+    Each entry in `sources` is a two-line markdown string:
+      PDF → "📄 **paper.pdf** — Page N\\n> *\\"excerpt…\\"*"
+      Web → "🌐 **[Title](url)**\\n> *\\"excerpt…\\"*"
+
+    Each citation must be its own st.markdown() call — wrapping in a bullet
+    (`- {s}`) causes Streamlit to print the blockquote `>` literally instead
+    of rendering it as an indented quote.
+
     IMPORTANT: always call this OUTSIDE any st.spinner() block.
-    Streamlit does not guarantee spinner-interior content persists after rerender.
     """
     if not sources:
         return
     if source_type == "pdf":
         st.markdown("**📄 Sources — from your documents:**")
-    else:
+    elif source_type == "web":
         st.markdown("**🌐 Sources — from web search:**")
+    else:
+        st.markdown("**🔍 Sources:**")
     for s in sources:
-        st.markdown(f"- {s}")
+        st.markdown(s)
+        st.markdown("---")
 
 
 # ═══════════════════════════════════════════════════════
@@ -193,22 +205,42 @@ def page_chat():
     # ALL computation happens inside ONE spinner so there is no
     # inter-spinner re-render that can wipe intermediate output.
     context, sources, source_type, response = "", [], "", ""
+    # Must be initialised here — if vector_db is None the retrieve_context
+    # block is skipped entirely, and `if not relevant` below would NameError.
+    relevant = False
     model = get_chatgroq_model()
 
     with st.spinner("Thinking…"):
-        # --- RAG retrieval (utils/rag_utils.py) ---
+        # --- RAG retrieval ---
         if st.session_state.vector_db is not None:
-            context, sources, relevant = retrieve_context(
+            # retrieve_context returns citations for ALL examined pages so that
+            # follow-up questions (which score above the threshold) still surface
+            # the pages that were looked at.  We stage them in pdf_sources and
+            # only promote to the final `sources` list if the PDF was actually
+            # relevant — otherwise the caller (web-search branch) decides what
+            # to show.
+            context, pdf_sources, relevant = retrieve_context(
                 st.session_state.vector_db, prompt
             )
-            if relevant and context:
+            if relevant:
+                sources     = pdf_sources   # PDF had useful content → show PDF citations
                 source_type = "pdf"
+            # If not relevant: pdf_sources is intentionally discarded here.
+            # Showing "examined, low relevance" PDF pages for an off-topic
+            # question would be misleading — the web-search branch takes over.
 
-        # --- Web search fallback (utils/rag_utils.py) ---
-        if not context:
+        # --- Web search fallback ---
+        # Runs whenever the PDF search found nothing above the relevance bar,
+        # OR when no PDF is loaded at all.
+        if not relevant:
             web_ctx, web_src = web_search(prompt)
             if web_ctx:
-                context, sources, source_type = web_ctx, web_src, "web"
+                context     = web_ctx   # replace (empty) PDF context with web snippets
+                sources     = web_src   # show web citations, NOT the stale PDF ones
+                source_type = "web"
+            # If web search also returns nothing: sources stays [], source_type stays "".
+            # render_sources() is a no-op on an empty list, so nothing is shown —
+            # which is correct; we shouldn't fabricate citations.
 
         # --- LLM response ---
         instruction = (
@@ -216,11 +248,11 @@ def page_chat():
             else "Provide a thorough, structured explanation."
         )
         system_prompt = f"""You are an expert AI research assistant.
-Answer using the provided context. If context is insufficient, use your knowledge.
-Style: {instruction}
+        Answer using the provided context. If context is insufficient, use your knowledge.
+        Style: {instruction}
 
-Context:
-{context or "No specific context available."}"""
+        Context:
+        {context or "No specific context available."}"""
 
         response = get_chat_response(model, st.session_state.messages, system_prompt)
 
