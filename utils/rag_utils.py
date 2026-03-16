@@ -14,7 +14,14 @@ from functools import lru_cache
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from duckduckgo_search import DDGS
+
+from googlesearch import search
+from newspaper import Article
+import requests
+from bs4 import BeautifulSoup
+from readability import Document
+
+from tavily import TavilyClient
 
 from models.embeddings import get_embedding_model
 
@@ -24,6 +31,7 @@ from config.config import (
     CHUNK_SIZE,
     CHUNK_OVERLAP,
     TOP_K_RESULTS,
+    TAVILY_API_KEY,
     WEB_SEARCH_MAX_RESULTS,
 )
 
@@ -133,25 +141,25 @@ def retrieve_context(vector_db, query):
         source   = doc.metadata.get("source", "Unknown")
         page_num = _get_page_num(doc.metadata)
 
-        # ── Citation card (collected for every examined page) ────────────────
-        # Collecting regardless of threshold means the caller gets a full picture
-        # of what was searched even for follow-up questions whose score sits just
-        # above the threshold.  The caller (app.py) only exposes these when
-        # is_relevant=True, so off-topic questions never surface stale PDF cites.
-        dedup_key = f"{source}::p{page_num}"
-        if dedup_key not in seen_pages:
-            seen_pages.add(dedup_key)
-            flat_text = " ".join(doc.page_content.split())
-            excerpt   = flat_text[:160] + ("…" if len(flat_text) > 160 else "")
-            sources.append(
-                f"📄 **{source}** — Page {page_num}\n"
-                f"> *\"{excerpt}\"*"
-            )
-
-        # ── LLM context (only high-confidence chunks) ───────────────────────
+        # Only create citations for relevant chunks
         if score < SIMILARITY_THRESHOLD:
+
             is_relevant = True
             context_chunks.append(doc.page_content)
+
+            dedup_key = f"{source}::p{page_num}"
+
+            if dedup_key not in seen_pages:
+
+                seen_pages.add(dedup_key)
+
+                flat_text = " ".join(doc.page_content.split())
+                excerpt = flat_text[:160] + ("…" if len(flat_text) > 160 else "")
+
+                sources.append(
+                    f"📄 **{source}** — Page {page_num}\n"
+                    f"> *\"{excerpt}\"*"
+        )
 
     return "\n\n".join(context_chunks), sources, is_relevant
 
@@ -160,44 +168,46 @@ def retrieve_context(vector_db, query):
 # Real-time Web Search
 # -------------------------------------------------------
 
+tavily = TavilyClient(api_key=TAVILY_API_KEY)
+
+
 def web_search(query):
     """
-    Perform a real-time web search using DuckDuckGo.
-    Called when RAG finds no relevant context in the uploaded PDFs.
+    Uses Tavily search API optimized for LLM applications.
 
     Returns:
-        context_text  (str)   — concatenated result snippets (fed to LLM)
-        sources       (list)  — formatted citation cards with clickable links
+        context_text (str) — text snippets used for answering
+        sources (list)     — formatted source cards with links
     """
-    results = []
-    sources = []
 
     try:
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=WEB_SEARCH_MAX_RESULTS):
-                body  = r.get("body",  "").strip()
-                link  = r.get("href",  "").strip()
-                title = r.get("title", link).strip()
 
-                # Compute excerpt at the top of the loop — before either `if`
-                # block — so it is always defined when sources.append runs,
-                # even when body is empty for a particular result.
-                excerpt = (body[:120] + "…") if len(body) > 120 else body
+        response = tavily.search(
+            query=query,
+            max_results=5
+        )
 
-                if body:
-                    results.append(body)
+        results = []
+        sources = []
 
-                if link:
-                    if excerpt:
-                        sources.append(
-                            f"🌐 **[{title}]({link})**\n"
-                            f"> *\"{excerpt}\"*"
-                        )
-                    else:
-                        sources.append(f"🌐 **[{title}]({link})**")
+        for r in response.get("results", []):
+
+            content = r.get("content", "").strip()
+            url = r.get("url", "")
+            title = r.get("title", url)
+
+            if not content:
+                continue
+
+            results.append(content)
+
+            sources.append(
+                f"🌐 **[{title}]({url})**\n"
+                f"> *\"{content[:160]}...\"*"
+            )
+
+        return "\n\n".join(results), sources
 
     except Exception as e:
-        print(f"[web_search] DuckDuckGo error: {e}")
+        print("[web_search] Tavily error:", e)
         return "", []
-
-    return "\n\n".join(results), sources
