@@ -15,12 +15,6 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 
-from googlesearch import search
-from newspaper import Article
-import requests
-from bs4 import BeautifulSoup
-from readability import Document
-
 from tavily import TavilyClient
 
 from models.embeddings import get_embedding_model
