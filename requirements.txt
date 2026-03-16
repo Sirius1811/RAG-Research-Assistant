@@ -15,6 +15,6 @@ faiss-cpu==1.8.0
 
 pypdf>=4.2.0
 
-tavily
+tavily-python>=0.3.3
 requests>=2.32.0
 beautifulsoup4>=4.12.3
