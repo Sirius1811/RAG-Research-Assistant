@@ -91,6 +91,8 @@ def render_sources(sources: list, source_type: str):
         st.markdown("**📄 Sources — from your documents:**")
     elif source_type == "web":
         st.markdown("**🌐 Sources — from web search:**")
+    elif source_type == "mixed":
+        st.markdown("**📚 Sources — documents + web:**")
     else:
         st.markdown("**🔍 Sources:**")
     for s in sources:
@@ -211,48 +213,57 @@ def page_chat():
     model = get_chatgroq_model()
 
     with st.spinner("Thinking…"):
-        # --- RAG retrieval ---
+        # --- PDF Retrieval ---
+        pdf_ctx, pdf_sources, relevant = "", [], False
+
         if st.session_state.vector_db is not None:
-            # retrieve_context returns citations for ALL examined pages so that
-            # follow-up questions (which score above the threshold) still surface
-            # the pages that were looked at.  We stage them in pdf_sources and
-            # only promote to the final `sources` list if the PDF was actually
-            # relevant — otherwise the caller (web-search branch) decides what
-            # to show.
-            context, pdf_sources, relevant = retrieve_context(
+            pdf_ctx, pdf_sources, relevant = retrieve_context(
                 st.session_state.vector_db, prompt
             )
-            if relevant:
-                sources     = pdf_sources   # PDF had useful content → show PDF citations
-                source_type = "pdf"
-            # If not relevant: pdf_sources is intentionally discarded here.
-            # Showing "examined, low relevance" PDF pages for an off-topic
-            # question would be misleading — the web-search branch takes over.
 
-        # --- Web search fallback ---
-        # Runs whenever the PDF search found nothing above the relevance bar,
-        # OR when no PDF is loaded at all.
-        if not relevant:
-            web_ctx, web_src = web_search(prompt)
-            if web_ctx:
-                context     = web_ctx   # replace (empty) PDF context with web snippets
-                sources     = web_src   # show web citations, NOT the stale PDF ones
-                source_type = "web"
-            # If web search also returns nothing: sources stays [], source_type stays "".
-            # render_sources() is a no-op on an empty list, so nothing is shown —
-            # which is correct; we shouldn't fabricate citations.
+        # --- Web Search ---
+        web_ctx, web_sources = web_search(prompt)
+
+        # --- Combine Contexts ---
+        context_parts = []
+
+        if pdf_ctx:
+            context_parts.append("PDF Context:\n" + pdf_ctx)
+
+        if web_ctx:
+            context_parts.append("Web Context:\n" + web_ctx)
+
+        context = "\n\n".join(context_parts)
+
+        # --- Combine Sources ---
+        sources = []
+        source_type = "mixed"
+
+        if pdf_sources:
+            sources.extend(pdf_sources)
+
+        if web_sources:
+            sources.extend(web_sources)
 
         # --- LLM response ---
         instruction = (
-            "Answer briefly in 2–3 sentences." if mode == "Concise"
+            "Answer briefly in 2-3 sentences." if mode == "Concise"
             else "Provide a thorough, structured explanation."
         )
-        system_prompt = f"""You are an expert AI research assistant.
-        Answer using the provided context. If context is insufficient, use your knowledge.
+        system_prompt = f"""
+        You are an expert AI research assistant.
+
+        Use the provided context which may include:
+        - excerpts from research papers
+        - information retrieved from web articles.
+
+        Base your answer on the provided context when possible.
+
         Style: {instruction}
 
         Context:
-        {context or "No specific context available."}"""
+        {context}
+        """
 
         response = get_chat_response(model, st.session_state.messages, system_prompt)
 
