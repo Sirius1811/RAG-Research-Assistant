@@ -5,7 +5,7 @@ import os
 # ==============================
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-SERP_API_KEY = os.getenv("SERP_API_KEY", "")  # optional fallback
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 
 # ==============================
 # MODEL SETTINGS
@@ -36,7 +36,7 @@ SIMILARITY_THRESHOLD = 1.0   # FAISS L2 distance — lower = more similar; 1.0 i
 # WEB SEARCH SETTINGS
 # ==============================
 
-WEB_SEARCH_MAX_RESULTS = 3
+WEB_SEARCH_MAX_RESULTS = 6
 
 # ==============================
 # CHUNK SETTINGS
